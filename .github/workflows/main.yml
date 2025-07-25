@@ -1,0 +1,138 @@
+name: DEV
+on:
+  workflow_call:
+    secrets:
+      SA_JSON_DEV:
+        required: true
+  
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEPLOYMENT_URL: https://${{ github.repository_owner}}.github.io/${{ github.event.repository.name }}/
+
+jobs:
+  shared:
+    if: ${{ github.event.pull_request.merged == true }}
+    uses: ./.github/workflows/shared.yml
+
+    permissions:
+      contents: read
+      actions: read
+      checks: write
+
+  # Run the OSV scanner on the locked the pubspec.lock file. It will look-up in
+  # a database of vulnerabilities if any of the dependencies have known issues.
+  # The pubspec.lock should be committed to your repository and make sure you do
+  # not updated it by mistake before building/testing on other steps.
+  security:
+    if: ${{ github.event.pull_request.merged == true }}
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@f0e6719deb666cd19a0b56bc56d01161bd848b4f # v1.8.5
+
+    with:
+      # Only available for Orgs and Public
+      upload-sarif: false
+
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      
+  get-repo-name:
+    runs-on: ubuntu-latest
+    needs: [shared, security]
+    outputs:
+      service_name: ${{ steps.set_repo_name.outputs.service_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set repository name
+        id: set_repo_name
+        env:
+          FULL_REPO_NAME: ${{ github.repository }}
+        run: |
+          REPO_NAME=$(echo $FULL_REPO_NAME | cut -d'/' -f2)
+          echo "service_name=$REPO_NAME" >> $GITHUB_OUTPUT
+        
+  build_and_deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    needs: get-repo-name  # Faz o "build_and_deploy" depender de "get-repo-name"
+    permissions:
+      contents: "read"
+      id-token: "write"
+
+    env:
+      # Pipeline Config
+      SERVICE_NAME: ${{ needs.get-repo-name.outputs.service_name }}  # Usando a saída de "get-repo-name"
+      SERVICE_REGION: us-central1
+      PROJECT_ID: prj-flutterflow-dev
+      ARTIFACT_REGISTRY_HOSTNAME: us-central1-docker.pkg.dev
+      ARTIFACT_REGISTRY_REPO: cloud-run-source-deploy
+      ENV: "dev"
+      WORKLOAD_IDENTITY_PROVIDER: 'projects/987818611750/locations/global/workloadIdentityPools/github-pool-dev/providers/github-provider-dev'
+      SERVICE_ACCOUNT: 'github-actions@prj-flutterflow-dev.iam.gserviceaccount.com'
+      SERVICE_ACCOUNT_RUN: 'cloudrun@prj-flutterflow-dev.iam.gserviceaccount.com'
+      GOOGLE_APPLICATION_CREDENTIALS: "${{ github.workspace }}/sa.json"
+      # Service Config
+      STARTUP_CPU_BOOST: "false"
+      MAX_SCALE: "5"
+      CONTAINER_CONCURRENCY: "80"
+      CONTAINER_PORT: "80"
+      RESOURCE_LIMIT_CPU: "1000m"
+      RESOURCE_LIMIT_MEMORY: "512Mi"
+      LOG_LEVEL: "INFO"
+      SPRING_DATASOURCE_URL_ENV_NAME: "SPRING_DATASOURCE_URL_DEV"
+      SPRING_DATASOURCE_USERNAME_ENV_NAME: "SPRING_DATASOURCE_USERNAME_DEV"
+      SPRING_DATASOURCE_PASSWORD_ENV_NAME: "SPRING_DATASOURCE_PASSWORD_DEV"
+
+    steps:
+      - uses: 'actions/checkout@v4'
+
+      - name: Authenticate to Google Cloud
+        run: |
+          echo "${{ secrets.SA_JSON_DEV }}" | base64 --decode > $GOOGLE_APPLICATION_CREDENTIALS
+          gcloud auth activate-service-account $SERVICE_ACCOUNT_RUN --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+          gcloud config set project ${{ env.PROJECT_ID }}
+          gcloud config set run/region ${{ env.SERVICE_REGION }}
+
+      - name: Authenticate to registry
+        run: |
+          gcloud auth configure-docker ${{ env.ARTIFACT_REGISTRY_HOSTNAME }}
+
+      - name: Build and Push Container
+        run: |-
+          ls
+          docker build -t "${{ env.ARTIFACT_REGISTRY_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.SERVICE_NAME }}/${{ env.ENV }}:${{ github.sha }}" .
+          docker push "${{ env.ARTIFACT_REGISTRY_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.SERVICE_NAME }}/${{ env.ENV }}:${{ github.sha }}"
+
+      - name: Create Service declaration
+        run: |-
+          export IMAGE="${{ env.ARTIFACT_REGISTRY_HOSTNAME }}/${{ env.PROJECT_ID }}/${{ env.ARTIFACT_REGISTRY_REPO }}/${{ env.SERVICE_NAME }}/${{ env.ENV }}:${{ github.sha }}"
+          export SERVICE="${{ env.SERVICE_NAME }}"
+          export SERVICE_ACCOUNT_RUN="${{ env.SERVICE_ACCOUNT_RUN }}"
+          export STARTUP_CPU_BOOST="${{ env.STARTUP_CPU_BOOST }}"
+          export MAX_SCALE="${{ env.MAX_SCALE }}"
+          export CONTAINER_CONCURRENCY="${{ env.CONTAINER_CONCURRENCY }}"
+          export CONTAINER_PORT="${{ env.CONTAINER_PORT }}"
+          export RESOURCE_LIMIT_CPU="${{ env.RESOURCE_LIMIT_CPU }}"
+          export RESOURCE_LIMIT_MEMORY="${{ env.RESOURCE_LIMIT_MEMORY }}"
+          export SPRING_DATASOURCE_URL_ENV_NAME="${{ env.SPRING_DATASOURCE_URL_ENV_NAME }}"
+          export SPRING_DATASOURCE_USERNAME_ENV_NAME="${{ env.SPRING_DATASOURCE_USERNAME_ENV_NAME }}"
+          export SPRING_DATASOURCE_PASSWORD_ENV_NAME="${{ env.SPRING_DATASOURCE_PASSWORD_ENV_NAME }}"
+          export PROJECT_ID="${{ env.PROJECT_ID }}"
+          export SERVICE_REGION="${{ env.SERVICE_REGION }}"
+          envsubst < .github/workflows/templates/service.template.yaml > service.yaml
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: 'google-github-actions/deploy-cloudrun@v2'
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.SERVICE_REGION }}
+          metadata: service.yaml
+
+      - name: Show Output
+        run: echo ${{ steps.deploy.outputs.url }}

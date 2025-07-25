@@ -1,0 +1,21 @@
+#
+# Run workflow will run for every Pull Request and will need
+# to be green on all bots before code can be merged.
+#
+name: Pull Request
+on:
+  workflow_call:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shared:
+    if: ${{ !github.event.pull_request.draft }}
+    uses: ./.github/workflows/shared.yml
+
+    permissions:
+      contents: read
+      actions: read
+      checks: write

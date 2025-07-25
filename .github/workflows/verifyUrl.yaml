@@ -1,0 +1,161 @@
+name: Verificar URL no JSON
+
+on:
+  workflow_call:
+
+jobs:
+  verify_url:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out the repository
+      uses: actions/checkout@v2
+
+    - name: Verificar se há alterações no arquivo environment.json usando GitHub API
+      id: check_changes_api
+      run: |
+        # Usar a API do GitHub para obter os arquivos alterados no PR
+        FILE_CHANGED=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+        "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+        | jq -r '.[].filename' | grep -q "assets/environment_values/environment.json" && echo "true" || echo "false")
+
+        if [ "$FILE_CHANGED" == "true" ]; then
+          echo "O arquivo environment.json foi modificado, vamos verificar a URL."
+          echo "environment_json_changed=true" >> $GITHUB_ENV
+        else
+          echo "Não há alterações no arquivo environment.json. O fluxo continuará normalmente."
+          echo "environment_json_changed=false" >> $GITHUB_ENV
+        fi
+
+    - name: Acessa arquivo environment.json
+      if: env.environment_json_changed == 'true'
+      id: acess_file
+      run: |
+        # Instalar jq, que é uma ferramenta para manipulação de JSON
+        sudo apt-get install jq
+
+        # Definir o caminho do arquivo JSON
+        FILE="assets/environment_values/environment.json"
+        
+        # Verificar se o arquivo existe
+        if [ ! -f "$FILE" ]; then
+          echo "Arquivo $FILE não encontrado!"
+          exit 1
+        fi
+
+    - name: Verifica se URL FreshService Está correta
+      id: check_url_fresh
+      run: |
+        # Definir o caminho do arquivo JSON
+        FILE="assets/environment_values/environment.json"
+        
+        # Verificar se o atributo 'url' existe no arquivo
+        URL_envVarURLFreshservice=$(jq -r '.envVarURLFreshservice // empty' "$FILE")
+        
+        if [ -z "$URL_envVarURLFreshservice" ]; then
+          echo "Atributo 'envVarURLFreshservice' não está presente no arquivo $FILE."
+          exit 0  # Não falha, apenas imprime a mensagem
+        fi
+
+        # Verificar se o valor de 'envVarURLFreshservice' é site.dev.com
+        if [[ "$URL_envVarURLFreshservice" != "https://piracanjuba-fs-sandbox.freshservice.com"* ]]; then
+          echo "O valor de 'envVarURLFreshservice' não é https://piracanjuba-fs-sandbox.freshservice.com. Valor encontrado: $URL"
+          exit 1
+        else
+          echo "URL FreshService está correto: $URL_envVarURLFreshservice"
+        fi
+
+
+    - name: Verifica se URL Hyperflow Está correta
+      id: check_url_hyperflow
+      run: |
+        # Definir o caminho do arquivo JSON
+        FILE="assets/environment_values/environment.json"
+
+        # Verificar se o atributo 'url' existe no arquivo
+        URL_envVarURLHyperflow=$(jq -r '.envVarURLHyperflow // empty' "$FILE")
+        
+        if [ -z "$URL_envVarURLHyperflow" ]; then
+          echo "Atributo 'envVarURLHyperflow' não está presente no arquivo $FILE."
+          exit 0  # Não falha, apenas imprime a mensagem
+        fi
+
+        # Verificar se o valor de 'envVarURLHyperflow' é site.dev.com
+        if [[ "$URL_envVarURLHyperflow" != "https://runtime.hyperflowapis.global/api/o4uQ2N5tO"* ]]; then
+          echo "O valor de 'envVarURLHyperflow' não é https://runtime.hyperflowapis.global/api/o4uQ2N5tO. Valor encontrado: $URL"
+          exit 1
+        else
+          echo "URL FreshService está correto: $URL_envVarURLHyperflow"
+        fi
+
+
+    - name: Verifica se instancia FreshService Está correto
+      id: check_inst_fresh
+      run: |
+        # Definir o caminho do arquivo JSON
+        FILE="assets/environment_values/environment.json"
+
+        # Verificar se o atributo 'url' existe no arquivo
+        URL_envVarInstanceFreshservice=$(jq -r '.envVarInstanceFreshservice // empty' "$FILE")
+        
+        if [ -z "$URL_envVarInstanceFreshservice" ]; then
+          echo "Atributo 'envVarInstanceFreshservice' não está presente no arquivo $FILE."
+          exit 0  # Não falha, apenas imprime a mensagem
+        fi
+
+        # Verificar se o valor de 'envVarInstanceFreshservice' é site.dev.com
+        if [[ "$URL_envVarInstanceFreshservice" != "qas" ]]; then
+          echo "O valor de 'envVarInstanceFreshservice' não está correto. Valor encontrado: $URL"
+          exit 1
+        else
+          echo "URL FreshService está correto: $URL_envVarInstanceFreshservice"
+        fi
+
+
+    - name: Verifica se URL Cors Está correta
+      id: check_url_cors
+      run: |
+        # Definir o caminho do arquivo JSON
+        FILE="assets/environment_values/environment.json"
+        
+        # Verificar se o atributo 'url' existe no arquivo
+        URL_envVarURLCORS=$(jq -r '.envVarURLCORS // empty' "$FILE")
+        
+        if [ -z "$URL_envVarURLCORS" ]; then
+          echo "Atributo 'envVarURLCORS' não está presente no arquivo $FILE."
+          exit 0  # Não falha, apenas imprime a mensagem
+        fi
+
+        # Verificar se o valor de 'envVarURLCORS' é site.dev.com
+        if [[ "$URL_envVarURLCORS" != "https://cors-anywhere-987818611750.us-central1.run.app/"* ]]; then
+          echo "O valor de 'envVarURLCORS' não é https://cors-anywhere-987818611750.us-central1.run.app/. Valor encontrado: $URL"
+          exit 1
+        else
+          echo "URL FreshService está correto: $URL_envVarURLCORS"
+        fi
+
+
+    - name: Verifica se URL Redirecionamento Está correta
+      id: check_url_Redirecionamento
+      run: |
+        # Definir o caminho do arquivo JSON
+        FILE="assets/environment_values/environment.json"
+        
+        # Verificar se o atributo 'url' existe no arquivo
+        URL_envVarURLdeRedirecionamento=$(jq -r '.envVarURLdeRedirecionamento // empty' "$FILE")
+        
+        if [ -z "$URL_envVarURLdeRedirecionamento" ]; then
+          echo "Atributo 'envVarURLdeRedirecionamento' não está presente no arquivo $FILE."
+          exit 0  # Não falha, apenas imprime a mensagem
+        fi
+
+        # Verificar se o valor de 'envVarURLdeRedirecionamento' é site.dev.com
+        if [[ "$URL_envVarURLdeRedirecionamento" != "https://flowdev.piracanjuba.com.br/"* ]]; then
+          echo "O valor de 'envVarURLdeRedirecionamento' não é https://flowdev.piracanjuba.com.br/. Valor encontrado: $URL"
+          exit 1
+        else
+          echo "URL FreshService está correto: $URL_envVarURLdeRedirecionamento"
+        fi
+
+    - name: Concluir
+      run: echo "Verificação concluída com sucesso!"

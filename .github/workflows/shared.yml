@@ -1,0 +1,102 @@
+#
+# Base workflow shared by both Main and PR workflows running
+# basic checks such as sanitizers and integration tests.
+#
+name: Shared
+on: workflow_call
+
+env:
+  # Keep this in sync with the version used by FlutterFlow.
+  FLUTTER_VERSION: 3.27.3
+
+jobs:
+  # Run a static code analysis of the code, checking for things ranging from
+  # code formatting to performance optimization and best practices. It may also
+  # help with finding simple bugs in the code logic.
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2
+        with:
+          channel: master
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      # FIXME: We should run this on all the code base, but some of the generated
+      # code is not yet passing 'flutter analyze'
+      - name: Analyze custom code
+        run: |
+          flutter pub get
+          echo flutter analyze lib/custom_code
+
+      # FIXME: Ditto for 'dart format'. We cannot run on all the code base yet
+      # because the generated code is not passing.
+      - name: Format custom code
+        run: |
+          flutter pub get
+          
+
+  test-web:
+    runs-on: ubuntu-24.04
+    needs: check
+    timeout-minutes: 20
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2
+        with:
+          channel: master
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Setup Chrome driver
+        run: |
+          chromedriver --port=4444 &
+          sleep 5
+
+      - name: Run integration tests on Chrome (canvaskit)
+        run: |
+          flutter pub get
+          flutter drive --driver=test_driver/integration_test.dart --target=integration_test/test.dart -d web-server --release --web-renderer=canvaskit
+          
+  build-web:
+    runs-on: ubuntu-24.04
+    needs: check
+    timeout-minutes: 10
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2
+        with:
+          channel: master
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Build for the Web
+        run: |
+          flutter pub get
+          flutter build web --release --base-href /${{ github.event.repository.name }}/
+
+      # GitHub Pages cannot do custom redirects, so routes won't work if
+      # accessed directly. This is a workaround because 404 is the default
+      # route on the GitHub Pages webserver if a file is not found.
+      - name: Hack for GitHub Pages
+        run: |
+          cp build/web/index.html build/web/404.html
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web

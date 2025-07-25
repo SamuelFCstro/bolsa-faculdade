@@ -1,0 +1,77 @@
+#
+# This is a special workflow that must be triggered by the user and will
+# initiate a sync of the FlutterFlow project.
+#
+# It is expected that FLUTTERFLOW_PROJECT_TOKEN environment variable exists
+# and it is set to the token for exporting the repository using the command
+# line tool. Ideally the token is stored as a GitHub secret.
+#
+# See: https://github.com/FlutterFlow/flutterflow-cli
+#
+name: Sync
+on:
+  workflow_call:
+    secrets:
+      FLUTTERFLOW_PROJECT_ID:
+        required: true
+      FLUTTERFLOW_PROJECT_TOKEN:
+        required: true
+      FLUTTERFLOW_PROJECT_ENDPOINT:
+        required: true
+  
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  # Keep this in sync with the version used by FlutterFlow.
+  FLUTTER_VERSION: 3.27.3
+  FLUTTERFLOW_PROJECT_ID: ${{ secrets.FLUTTERFLOW_PROJECT_ID }}
+  FLUTTERFLOW_PROJECT_TOKEN: ${{ secrets.FLUTTERFLOW_PROJECT_TOKEN }}
+  FLUTTERFLOW_PROJECT_ENDPOINT: ${{ secrets.FLUTTERFLOW_PROJECT_ENDPOINT || 'https://api.flutterflow.io/v1' }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@44ac965b96f18d999802d4b807e3256d5a3f9fa1 # v2
+        with:
+          channel: master
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Setup flutterflow-cli
+        run: |
+          dart pub global activate flutterflow_cli
+
+      - name: Export FlutterFlow project
+        run: |
+          flutterflow export-code \
+              --project $FLUTTERFLOW_PROJECT_ID \
+              --token $FLUTTERFLOW_PROJECT_TOKEN \
+              --endpoint $FLUTTERFLOW_PROJECT_ENDPOINT \
+              --project-environment Development \
+              --include-assets \
+              --no-parent-folder \
+              --fix
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@5e914681df9dc83aa4e4905692ca88beb2f9e91f # v7
+        with:
+          branch: flutterflow-Sync-Development
+          labels: sync
+          delete-branch: true
+          assignees: ${{ github.actor }}
+          draft: always-true
+          commit-message: Sync FlutterFlow App project
+          title: MAIN - Sync FlutterFlow App project
+          body: Requested by @${{ github.actor }}.
